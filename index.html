@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="zh-Hant" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>單字爆破王</title>
+  <script src="/_sdk/data_sdk.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+        body {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .falling-word {
+            position: absolute;
+            font-size: 1.5rem;
+            font-weight: bold;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            transition: transform 0.1s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            animation: fall linear forwards;
+            user-select: none;
+        }
+
+        .falling-word:hover {
+            transform: scale(1.1);
+        }
+
+        .falling-word.explode {
+            animation: explode 0.5s forwards;
+        }
+
+        @keyframes fall {
+            from {
+                top: -10%;
+            }
+            to {
+                top: 110%;
+            }
+        }
+
+        @keyframes explode {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(2);
+                opacity: 0;
+            }
+        }
+
+        .choice-button {
+            transition: all 0.2s;
+        }
+
+        .choice-button:active {
+            transform: scale(0.95);
+        }
+
+        .choice-button.correct {
+            animation: correctPulse 0.5s;
+        }
+
+        .choice-button.wrong {
+            animation: wrongShake 0.5s;
+        }
+
+        @keyframes correctPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        @keyframes wrongShake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+
+        .particle {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            pointer-events: none;
+            animation: particle-burst 0.6s ease-out forwards;
+        }
+
+        @keyframes particle-burst {
+            0% {
+                transform: translate(0, 0) scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(var(--tx), var(--ty)) scale(0);
+                opacity: 0;
+            }
+        }
+
+        .combo-badge {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 4rem;
+            font-weight: 900;
+            z-index: 1000;
+            animation: comboPop 0.8s ease-out forwards;
+            pointer-events: none;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
+        }
+
+        @keyframes comboPop {
+            0% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 0;
+            }
+            50% {
+                transform: translate(-50%, -50%) scale(1.2);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 0;
+            }
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+        }
+    </style>
+  <style>@view-transition { navigation: auto; }</style>
+ </head>
+ <body class="h-full">
+  <div class="h-full w-full overflow-hidden" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);"><!-- 遊戲標題與資訊 -->
+   <header class="absolute top-0 left-0 right-0 z-10 p-4 flex justify-between items-center">
+    <div>
+     <h1 class="text-3xl font-black text-white drop-shadow-lg" id="gameTitle">單字爆破王 💥</h1>
+     <p class="text-white text-sm mt-1 opacity-90">點擊正確的中文解釋！</p>
+    </div>
+    <div class="text-right">
+     <div class="text-white text-sm opacity-90" id="scoreLabel">
+      分數
+     </div>
+     <div class="text-4xl font-black text-white drop-shadow-lg" id="scoreDisplay">
+      0
+     </div>
+     <div class="text-white text-xs mt-1" id="comboDisplay">
+      連擊: 0
+     </div>
+    </div>
+   </header><!-- 遊戲區域 -->
+   <main class="h-full w-full pt-28 pb-32">
+    <div id="gameArea" class="game-container h-full"></div>
+   </main><!-- 選擇按鈕區 -->
+   <footer class="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/30 to-transparent">
+    <div id="choicesContainer" class="max-w-4xl mx-auto grid grid-cols-2 gap-3"><!-- 選擇按鈕將動態生成 -->
+    </div>
+   </footer><!-- 開始/結束畫面 -->
+   <div id="startScreen" class="absolute inset-0 flex items-center justify-center bg-black/80 z-50">
+    <div class="text-center p-8">
+     <h2 class="text-5xl font-black text-white mb-4">單字爆破王 💥</h2>
+     <p class="text-white text-lg mb-2">點擊正確的中文解釋擊落單字！</p>
+     <p class="text-yellow-300 text-sm mb-8">速度會越來越快，挑戰你的極限！</p>
+     <div id="addWordsSection" class="mb-8">
+      <div class="bg-white/10 backdrop-blur rounded-lg p-6 max-w-md mx-auto">
+       <h3 class="text-white text-xl font-bold mb-4">新增單字庫</h3>
+       <form id="addWordForm" class="space-y-3"><input type="text" id="wordInput" placeholder="英文單字" class="w-full px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 border-2 border-white/30 focus:border-white focus:outline-none" required> <input type="text" id="defInput" placeholder="中文解釋" class="w-full px-4 py-2 rounded-lg bg-white/20 text-white placeholder-white/60 border-2 border-white/30 focus:border-white focus:outline-none" required> <button type="submit" id="addWordBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg transition"> ➕ 新增單字 </button>
+       </form>
+       <div class="text-white/80 text-sm mt-3" id="wordCount">
+        已有 0 個單字
+       </div>
+      </div>
+     </div><button id="startButton" class="bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-black text-2xl py-4 px-12 rounded-full shadow-2xl transform hover:scale-110 transition disabled:opacity-50 disabled:cursor-not-allowed"> 🚀 開始遊戲 </button>
+    </div>
+   </div>
+  </div><!-- Toast 通知 -->
+  <div id="toast" class="toast"></div>
+  <script>
+        // 內建單字庫
+        const builtInWords = [
+            { word: "Apple", definition: "蘋果" },
+            { word: "Book", definition: "書" },
+            { word: "Cat", definition: "貓" },
+            { word: "Dog", definition: "狗" },
+            { word: "Happy", definition: "快樂的" },
+            { word: "Water", definition: "水" },
+            { word: "Friend", definition: "朋友" },
+            { word: "Love", definition: "愛" },
+            { word: "Music", definition: "音樂" },
+            { word: "School", definition: "學校" },
+            { word: "Dream", definition: "夢想" },
+            { word: "Beautiful", definition: "美麗的" },
+            { word: "Strong", definition: "強壯的" },
+            { word: "Smart", definition: "聰明的" },
+            { word: "Fire", definition: "火" },
+            { word: "Ice", definition: "冰" },
+            { word: "Sun", definition: "太陽" },
+            { word: "Moon", definition: "月亮" },
+            { word: "Star", definition: "星星" },
+            { word: "Ocean", definition: "海洋" },
+            { word: "Mountain", definition: "山" },
+            { word: "River", definition: "河流" },
+            { word: "Forest", definition: "森林" },
+            { word: "Flower", definition: "花" },
+            { word: "Tree", definition: "樹" },
+            { word: "Bird", definition: "鳥" },
+            { word: "Fish", definition: "魚" },
+            { word: "Butterfly", definition: "蝴蝶" },
+            { word: "Rainbow", definition: "彩虹" },
+            { word: "Thunder", definition: "雷" },
+            { word: "Lightning", definition: "閃電" },
+            { word: "Cloud", definition: "雲" },
+            { word: "Wind", definition: "風" },
+            { word: "Rain", definition: "雨" },
+            { word: "Snow", definition: "雪" },
+            { word: "Summer", definition: "夏天" },
+            { word: "Winter", definition: "冬天" },
+            { word: "Spring", definition: "春天" },
+            { word: "Autumn", definition: "秋天" },
+            { word: "Morning", definition: "早晨" },
+            { word: "Night", definition: "夜晚" },
+            { word: "Time", definition: "時間" },
+            { word: "Hope", definition: "希望" },
+            { word: "Peace", definition: "和平" },
+            { word: "Freedom", definition: "自由" },
+            { word: "Courage", definition: "勇氣" },
+            { word: "Wisdom", definition: "智慧" },
+            { word: "Journey", definition: "旅程" },
+            { word: "Adventure", definition: "冒險" },
+            { word: "Magic", definition: "魔法" }
+        ];
+
+        // 全域狀態
+        let words = [];
+        let gameActive = false;
+        let score = 0;
+        let combo = 0;
+        let currentWord = null;
+        let currentChoices = [];
+        let spawnInterval = null;
+        let difficultyLevel = 1;
+        let fallDuration = 8000;
+
+        // 預設配置
+        const defaultConfig = {
+            game_title: "單字爆破王 💥",
+            start_button_text: "🚀 開始遊戲",
+            score_label: "分數",
+            background_gradient_start: "#667eea",
+            background_gradient_end: "#764ba2",
+            word_color: "#fbbf24",
+            button_color: "#10b981",
+            text_color: "#ffffff"
+        };
+
+        // DOM 元素
+        const gameArea = document.getElementById('gameArea');
+        const choicesContainer = document.getElementById('choicesContainer');
+        const startScreen = document.getElementById('startScreen');
+        const startButton = document.getElementById('startButton');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const comboDisplay = document.getElementById('comboDisplay');
+        const addWordForm = document.getElementById('addWordForm');
+        const wordInput = document.getElementById('wordInput');
+        const defInput = document.getElementById('defInput');
+        const addWordBtn = document.getElementById('addWordBtn');
+        const wordCount = document.getElementById('wordCount');
+
+        // Toast 通知
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.backgroundColor = type === 'success' ? '#10b981' : '#ef4444';
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // 創建粒子效果
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 12; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.backgroundColor = color;
+                particle.style.left = x + 'px';
+                particle.style.top = y + 'px';
+                
+                const angle = (i / 12) * Math.PI * 2;
+                const distance = 50 + Math.random() * 50;
+                particle.style.setProperty('--tx', Math.cos(angle) * distance + 'px');
+                particle.style.setProperty('--ty', Math.sin(angle) * distance + 'px');
+                
+                gameArea.appendChild(particle);
+                setTimeout(() => particle.remove(), 600);
+            }
+        }
+
+        // 顯示連擊特效
+        function showComboEffect() {
+            if (combo < 5) return;
+            
+            const badge = document.createElement('div');
+            badge.className = 'combo-badge';
+            badge.style.color = '#fbbf24';
+            badge.textContent = `${combo}x COMBO!`;
+            document.body.appendChild(badge);
+            setTimeout(() => badge.remove(), 800);
+        }
+
+        // 生成隨機選項
+        function generateChoices(correctDef) {
+            const choices = [correctDef];
+            const availableWords = words.filter(w => w.definition !== correctDef);
+            
+            while (choices.length < 4 && availableWords.length > 0) {
+                const randomIndex = Math.floor(Math.random() * availableWords.length);
+                const def = availableWords[randomIndex].definition;
+                if (!choices.includes(def)) {
+                    choices.push(def);
+                }
+                availableWords.splice(randomIndex, 1);
+            }
+            
+            // ��亂順序
+            return choices.sort(() => Math.random() - 0.5);
+        }
+
+        // 更新選擇按鈕
+        function updateChoices() {
+            if (!currentWord || currentChoices.length === 0) return;
+            
+            choicesContainer.innerHTML = '';
+            currentChoices.forEach(choice => {
+                const button = document.createElement('button');
+                button.className = 'choice-button bg-white/20 backdrop-blur hover:bg-white/30 text-white font-bold py-4 px-6 rounded-xl text-lg';
+                button.textContent = choice;
+                button.onclick = () => handleChoice(choice);
+                choicesContainer.appendChild(button);
+            });
+        }
+
+        // 處理選擇
+        function handleChoice(selectedDef) {
+            if (!currentWord) return;
+            
+            const allWords = document.querySelectorAll('.falling-word');
+            let foundMatch = false;
+            
+            allWords.forEach(wordEl => {
+                const wordData = JSON.parse(wordEl.dataset.word);
+                if (wordData.definition === selectedDef) {
+                    foundMatch = true;
+                    const rect = wordEl.getBoundingClientRect();
+                    
+                    if (wordData.definition === currentWord.definition) {
+                        // 正確答案
+                        wordEl.classList.add('explode');
+                        createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, '#10b981');
+                        
+                        combo++;
+                        score += 10 * combo;
+                        scoreDisplay.textContent = score;
+                        comboDisplay.textContent = `連擊: ${combo}`;
+                        showComboEffect();
+                        
+                        // 按鈕正確反饋
+                        const buttons = choicesContainer.querySelectorAll('.choice-button');
+                        buttons.forEach(btn => {
+                            if (btn.textContent === selectedDef) {
+                                btn.classList.add('correct');
+                            }
+                        });
+                        
+                        setTimeout(() => wordEl.remove(), 500);
+                        spawnWord();
+                    } else {
+                        // 錯誤答案
+                        combo = 0;
+                        comboDisplay.textContent = `連擊: 0`;
+                        
+                        // 按鈕錯誤反饋
+                        const buttons = choicesContainer.querySelectorAll('.choice-button');
+                        buttons.forEach(btn => {
+                            if (btn.textContent === selectedDef) {
+                                btn.classList.add('wrong');
+                            }
+                        });
+                    }
+                }
+            });
+        }
+
+        // 生成下落的單字
+        function spawnWord() {
+            if (!gameActive || words.length < 4) return;
+            
+            const randomWord = words[Math.floor(Math.random() * words.length)];
+            currentWord = randomWord;
+            currentChoices = generateChoices(randomWord.definition);
+            updateChoices();
+            
+            const wordEl = document.createElement('div');
+            wordEl.className = 'falling-word';
+            wordEl.textContent = randomWord.word;
+            wordEl.style.left = Math.random() * (window.innerWidth - 200) + 'px';
+            wordEl.style.backgroundColor = '#fbbf24';
+            wordEl.style.color = '#1f2937';
+            wordEl.style.animationDuration = fallDuration + 'ms';
+            wordEl.dataset.word = JSON.stringify(randomWord);
+            
+            gameArea.appendChild(wordEl);
+            
+            // 單字掉落完畢後移除
+            setTimeout(() => {
+                if (wordEl.parentElement) {
+                    wordEl.remove();
+                    if (gameActive) {
+                        combo = 0;
+                        comboDisplay.textContent = `連擊: 0`;
+                    }
+                }
+            }, fallDuration);
+        }
+
+        // 開始遊戲
+        function startGame() {
+            // 有內建單字庫，可以直接開始
+            if (words.length === 0) {
+                words = [...builtInWords];
+            }
+            
+            gameActive = true;
+            score = 0;
+            combo = 0;
+            difficultyLevel = 1;
+            fallDuration = 8000;
+            
+            scoreDisplay.textContent = '0';
+            comboDisplay.textContent = '連擊: 0';
+            gameArea.innerHTML = '';
+            startScreen.classList.add('hidden');
+            
+            spawnWord();
+            
+            // 定期生成新單字，隨時間加快
+            spawnInterval = setInterval(() => {
+                if (gameActive) {
+                    spawnWord();
+                    
+                    // 增加難度
+                    difficultyLevel += 0.1;
+                    fallDuration = Math.max(3000, 8000 - (difficultyLevel * 200));
+                }
+            }, 3000);
+        }
+
+        // 結束遊戲
+        function endGame() {
+            gameActive = false;
+            clearInterval(spawnInterval);
+            gameArea.innerHTML = '';
+            startScreen.classList.remove('hidden');
+            showToast(`遊戲結束！最終得分: ${score}`, 'success');
+        }
+
+        // 新增單字
+        addWordForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const word = wordInput.value.trim();
+            const definition = defInput.value.trim();
+            
+            if (!word || !definition) {
+                showToast('請填寫完整資訊', 'error');
+                return;
+            }
+
+            if (words.length >= 999) {
+                showToast('已達到 999 個單字上限', 'error');
+                return;
+            }
+            
+            addWordBtn.disabled = true;
+            addWordBtn.textContent = '新增中...';
+            
+            const result = await window.dataSdk.create({
+                word: word,
+                definition: definition,
+                created_at: new Date().toISOString()
+            });
+            
+            addWordBtn.disabled = false;
+            addWordBtn.textContent = '➕ 新增單字';
+            
+            if (result.isOk) {
+                wordInput.value = '';
+                defInput.value = '';
+                showToast('單字已新增！');
+            } else {
+                showToast('新增失敗', 'error');
+            }
+        });
+
+        // 開始按鈕
+        startButton.addEventListener('click', startGame);
+
+        // Data SDK 處理器
+        const dataHandler = {
+            onDataChanged(data) {
+                // 合併內建單字庫和使用者新增的單字
+                const userWords = data.map(d => ({ word: d.word, definition: d.definition }));
+                words = [...builtInWords, ...userWords].sort(() => Math.random() - 0.5);
+                wordCount.textContent = `內建 ${builtInWords.length} 個 + 自訂 ${userWords.length} 個 = 共 ${words.length} 個單字`;
+                startButton.disabled = false;
+                startButton.textContent = defaultConfig.start_button_text;
+            }
+        };
+
+        // 配置變更處理
+        async function onConfigChange(config) {
+            document.getElementById('gameTitle').textContent = config.game_title || defaultConfig.game_title;
+            document.getElementById('scoreLabel').textContent = config.score_label || defaultConfig.score_label;
+            
+            if (words.length >= 4) {
+                startButton.textContent = config.start_button_text || defaultConfig.start_button_text;
+            }
+            
+            const bgStart = config.background_gradient_start || defaultConfig.background_gradient_start;
+            const bgEnd = config.background_gradient_end || defaultConfig.background_gradient_end;
+            document.querySelector('.h-full.w-full.overflow-hidden').style.background = 
+                `linear-gradient(135deg, ${bgStart} 0%, ${bgEnd} 100%)`;
+        }
+
+        // ��始化
+        (async () => {
+            const initResult = await window.dataSdk.init(dataHandler);
+            if (!initResult.isOk) {
+                showToast('資料載入失敗', 'error');
+                return;
+            }
+
+            if (window.elementSdk) {
+                window.elementSdk.init({
+                    defaultConfig,
+                    onConfigChange,
+                    mapToCapabilities: (config) => ({
+                        recolorables: [
+                            {
+                                get: () => config.background_gradient_start || defaultConfig.background_gradient_start,
+                                set: (value) => {
+                                    config.background_gradient_start = value;
+                                    window.elementSdk.setConfig({ background_gradient_start: value });
+                                }
+                            },
+                            {
+                                get: () => config.background_gradient_end || defaultConfig.background_gradient_end,
+                                set: (value) => {
+                                    config.background_gradient_end = value;
+                                    window.elementSdk.setConfig({ background_gradient_end: value });
+                                }
+                            },
+                            {
+                                get: () => config.word_color || defaultConfig.word_color,
+                                set: (value) => {
+                                    config.word_color = value;
+                                    window.elementSdk.setConfig({ word_color: value });
+                                }
+                            },
+                            {
+                                get: () => config.button_color || defaultConfig.button_color,
+                                set: (value) => {
+                                    config.button_color = value;
+                                    window.elementSdk.setConfig({ button_color: value });
+                                }
+                            },
+                            {
+                                get: () => config.text_color || defaultConfig.text_color,
+                                set: (value) => {
+                                    config.text_color = value;
+                                    window.elementSdk.setConfig({ text_color: value });
+                                }
+                            }
+                        ],
+                        borderables: [],
+                        fontEditable: undefined,
+                        fontSizeable: undefined
+                    }),
+                    mapToEditPanelValues: (config) => new Map([
+                        ["game_title", config.game_title || defaultConfig.game_title],
+                        ["start_button_text", config.start_button_text || defaultConfig.start_button_text],
+                        ["score_label", config.score_label || defaultConfig.score_label]
+                    ])
+                });
+            }
+        })();
+    </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9aeade28414bc4ed',t:'MTc2NTg1MzM2OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
